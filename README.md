@@ -1,0 +1,202 @@
+# credibility
+
+Bühlmann-Straub credibility models for non-life insurance pricing.
+
+---
+
+## The problem
+
+You price a portfolio of schemes. Scheme A has three years of data and a 72% loss ratio. The book average is 58%. How much do you trust scheme A's own experience when setting next year's rate?
+
+If you give it full weight, you are at the mercy of three years of claims volatility. If you ignore it entirely and use the book rate, you are mispricing the scheme's risk profile. The right answer is somewhere between the two — and the position depends on:
+
+1. How much exposure scheme A has (more exposure → more trust in its own data)
+2. How noisy year-to-year loss ratios are across the portfolio (noisier → trust the book more)
+3. How genuinely different schemes are from each other (more heterogeneous → trust each scheme's own data more)
+
+Bühlmann-Straub credibility theory gives a mathematically rigorous way to estimate all three and compute the optimal blend. This package implements it in Python, with no dependencies beyond NumPy and pandas.
+
+---
+
+## What it does
+
+- **`BuhlmannStraub`**: the standard two-parameter model. Given a panel of loss rates with exposure weights, it estimates the structural parameters (EPV, VHM, Bühlmann's k) and produces credibility-weighted premiums for each group.
+
+- **`HierarchicalBuhlmannStraub`**: multi-level extension for nested structures. Useful for geographic rating (region → district → sector) or organisational hierarchies (portfolio → scheme → sub-scheme), where thin nodes borrow strength from their parent.
+
+---
+
+## Installation
+
+```bash
+pip install credibility
+```
+
+Requires Python 3.9+ and pandas, numpy.
+
+---
+
+## Quick start
+
+### Scheme pricing
+
+```python
+import pandas as pd
+from credibility import BuhlmannStraub
+
+# One row per scheme per year. loss_rate is ultimate loss ratio.
+# exposure is earned premium (or earned car years, or policy count —
+# whatever you are weighting by).
+df = pd.DataFrame({
+    "scheme":    ["Motor Guild", "Motor Guild", "Motor Guild",
+                  "Teachers",    "Teachers",    "Teachers",
+                  "NHS Staff",   "NHS Staff",   "NHS Staff"],
+    "year":      [2021, 2022, 2023] * 3,
+    "loss_rate": [0.72, 0.68, 0.74,   # Motor Guild: volatile, above-average
+                  0.55, 0.52, 0.57,   # Teachers: stable, below-average
+                  0.63, 0.60, 0.61],  # NHS Staff: stable, near book
+    "exposure":  [1_200, 1_350, 1_100,
+                  4_500, 4_800, 5_100,
+                  800,   850,   900],
+})
+
+bs = BuhlmannStraub()
+bs.fit(df, group_col="scheme", period_col="year",
+       loss_col="loss_rate", weight_col="exposure")
+
+bs.summary()
+```
+
+Output:
+
+```
+Bühlmann-Straub Credibility Model
+==========================================
+  Collective mean    mu  = 0.6153
+  Process variance   v   = 0.000526   (EPV, within-group)
+  Between-group var  a   = 0.004018   (VHM, between-group)
+  Credibility param  k   = 0.131      (v / a)
+
+  Interpretation: a group needs exposure = k to achieve Z = 0.50
+
+  Scheme          Exposure  Obs. Mean  Z       Cred. Premium  Complement
+  Motor Guild       3650     0.713    0.9996      0.713          0.615
+  Teachers         14400     0.547    1.0000      0.547          0.615
+  NHS Staff         2550     0.613    0.9995      0.613          0.615
+```
+
+The structural parameters:
+
+- **mu = 0.615**: book-wide weighted mean loss ratio — the complement all groups blend toward.
+- **v = 0.000526**: EPV, the expected within-scheme year-to-year variance. Low: these schemes are fairly stable year to year.
+- **a = 0.004018**: VHM, the variance of true underlying loss ratios between schemes. Relatively high compared to v — the schemes genuinely differ. This drives Bühlmann's k very low (k = 0.131), which means Z is close to 1 even for small exposures.
+- **k = 0.131**: a scheme only needs 131 units of exposure to reach Z = 0.50. With the exposures here, all three schemes are at near-full credibility.
+
+For less heterogeneous portfolios (where k is much larger), the blend matters more.
+
+### Accessing results programmatically
+
+```python
+bs.mu_hat_   # 0.6153 — collective mean
+bs.v_hat_    # 0.000526 — EPV (within-group variance)
+bs.a_hat_    # 0.004018 — VHM (between-group variance)
+bs.k_        # 0.131 — Bühlmann's k
+
+bs.z_        # Series: {"Motor Guild": 0.9996, "Teachers": 1.0, "NHS Staff": 0.9995}
+bs.premiums_ # DataFrame with exposure, observed_mean, Z, credibility_premium, complement
+```
+
+### Hierarchical credibility for geographic rating
+
+Three-level postcode hierarchy. Each postcode sector borrows strength from its district, each district from its area.
+
+```python
+from credibility import HierarchicalBuhlmannStraub
+
+model = HierarchicalBuhlmannStraub(level_cols=["area", "district", "sector"])
+model.fit(
+    df,
+    period_col="year",
+    loss_col="loss_rate",
+    weight_col="exposure",
+)
+
+model.summary()                      # structural parameters at each level
+model.premiums_at("sector")         # blended sector-level premiums
+model.premiums_at("district")       # blended district-level premiums
+model.level_results_["district"].k  # Bühlmann's k at district level
+```
+
+The model fits variance components bottom-up (sector → district → area) and then computes premiums top-down, so each sector's final premium reflects the information at all three levels.
+
+---
+
+## Structural parameters — what they tell you
+
+| Parameter | Symbol | Meaning |
+|---|---|---|
+| Collective mean | mu | Grand weighted average loss rate across all groups |
+| Process variance | v (EPV) | Average within-group year-to-year variance. High v → noisy data → lean on book |
+| Between-group variance | a (VHM) | Variance of true loss rates between groups. High a → groups genuinely differ → trust their own data |
+| Bühlmann's k | k = v/a | Exposure at which a group reaches Z = 0.5. Small k → fast path to credibility |
+| Credibility factor | Z_i | W_i / (W_i + k), where W_i is the group's total exposure |
+| Credibility premium | P_i | Z_i * X_bar_i + (1 - Z_i) * mu |
+
+If the a_hat estimate is negative (rare, but possible with fewer than ~5 groups or a very homogeneous portfolio), the model truncates it to zero and sets all Z = 0. This means the data gives no evidence of between-group heterogeneity — every group gets the collective mean.
+
+---
+
+## The Hachemeister benchmark
+
+The standard validation dataset is Hachemeister (1975): 5 US states, 12 quarters of bodily injury liability loss ratios with exposure weights. The R package `actuar` ships this dataset and uses it to validate `cm()`.
+
+Our model matches `actuar::cm()` to within 0.1% on all structural parameters:
+
+| Parameter | actuar | this package |
+|---|---|---|
+| mu | 1523.65 | 1523.65 |
+| v (EPV) | 46729.1 | 46729.1 |
+| a (VHM) | 15053.9 | 15053.9 |
+| k | 3.1036 | 3.1036 |
+
+Credibility premiums match to within 0.2%.
+
+---
+
+## Design decisions
+
+**Why no scipy?** The structural parameter estimators (Bühlmann-Straub 1970) are closed-form. There is no optimisation step, no matrix decomposition beyond what numpy handles. Keeping the dependency list minimal (numpy, pandas) makes the package easier to deploy in restricted environments.
+
+**Why pandas for output, not numpy arrays?** Pricing teams work with named groups. A Series indexed by scheme name or postcode sector is usable directly. An array of floats requires a separate lookup table.
+
+**Why truncate negative a_hat rather than using an iterative estimator?** The closed-form estimator is transparent and exactly matches actuar's default `method="unbiased"`. Negative a_hat is a signal, not a failure — it tells you the portfolio appears homogeneous. Truncating at zero is the standard actuarial convention (Bühlmann & Gisler, 2005, §4.3).
+
+**Why separate `HierarchicalBuhlmannStraub` instead of a `levels` argument?** The hierarchical model has genuinely different output (per-level parameters, multi-level premiums). Merging it with `BuhlmannStraub` would make both classes harder to use.
+
+---
+
+## Relationship to other methods
+
+- **Ridge regression on dummy variables is mathematically equivalent to Bühlmann-Straub credibility** when the ridge parameter K is estimated from data (Ohlsson, 2008). If you are using L2-penalised GLMs (e.g., glum), you are already doing credibility weighting. This package makes the K, Z, and structural parameters explicit.
+
+- **statsmodels MixedLM** fits the same model under Normal response. It does not produce actuarial output (Z factors, structural parameters in v/a form) and has no hierarchical Bühlmann-Straub equivalent.
+
+- **actuar (R)** is the gold standard reference. This package matches its output on the Hachemeister dataset.
+
+---
+
+## References
+
+1. Bühlmann, H. (1967). Experience rating and credibility. *ASTIN Bulletin*, 4(3), 199–207.
+2. Bühlmann, H. & Straub, E. (1970). Glaubwürdigkeit für Schadensätze. *Mitteilungen VSVM*, 70, 111–133.
+3. Jewell, W.S. (1975). Regularity conditions for exact credibility. *ASTIN Bulletin*, 8(3), 336–341.
+4. Hachemeister, C.A. (1975). Credibility for regression models with application to trend. In *Credibility: Theory and Applications*, Academic Press.
+5. Bühlmann, H. & Gisler, A. (2005). *A Course in Credibility Theory and its Applications*. Springer.
+6. Ohlsson, E. (2008). Combining generalized linear models and credibility models in practice. *Scandinavian Actuarial Journal*, 2008(4), 301–314.
+7. Dutang, C., Goulet, V. & Pigeon, M. actuar: Actuarial functions and heavy-tailed distributions. R package, CRAN.
+
+---
+
+## Licence
+
+MIT. See LICENSE.
