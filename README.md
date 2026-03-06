@@ -29,7 +29,7 @@ Bühlmann-Straub credibility theory gives a mathematically rigorous way to estim
 ## Installation
 
 ```bash
-pip install credibility
+uv pip install credibility
 ```
 
 Requires Python 3.9+ and polars, numpy.
@@ -37,7 +37,7 @@ Requires Python 3.9+ and polars, numpy.
 If you want to pass pandas DataFrames as input (they are converted to Polars internally), install the optional pandas bridge:
 
 ```bash
-pip install "credibility[pandas]"
+uv pip install "credibility[pandas]"
 ```
 
 ---
