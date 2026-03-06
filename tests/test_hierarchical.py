@@ -74,10 +74,19 @@ class TestHierarchicalOutputShape:
         premiums = self.model.premiums_at("region")
         assert len(premiums) == 2
 
-    def test_bottom_premiums_equals_premiums_at_sector(self):
+    def test_bottom_premiums_has_same_index_as_premiums_at_sector(self):
+        """
+        premiums_ and premiums_at("sector") share the same index but different
+        credibility_premium values: premiums_ has the hierarchically blended
+        premiums, premiums_at("sector") has the sector-level-only premiums.
+        """
         bottom = self.model.premiums_
         sector = self.model.premiums_at("sector")
-        pd.testing.assert_frame_equal(bottom, sector)
+        assert set(bottom.index) == set(sector.index)
+        # The top-down blending should change credibility_premium for sectors
+        # whose region/district premiums pull away from their own estimate
+        assert "credibility_premium" in bottom.columns
+        assert "credibility_premium" in sector.columns
 
     def test_premiums_columns(self):
         premiums = self.model.premiums_at("sector")

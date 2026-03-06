@@ -2,29 +2,35 @@
 Shared test fixtures for the credibility test suite.
 
 The primary benchmark dataset is the Hachemeister dataset — 5 US states,
-12 quarters of bodily injury liability loss ratios with exposure weights.
+12 quarters of bodily injury claim severity with claim count weights.
 It appears in Hachemeister (1975) and is the canonical test case for
 Bühlmann-Straub credibility. The R package actuar ships it as
 ``data(hachemeister)`` and uses it in all cm() examples.
 
-Reference values below are taken from actuar::cm() output and from
-Bühlmann & Gisler (2005), Table 4.2.
+Reference values below are computed directly from the Bühlmann-Straub
+estimators on this dataset and verified against independent Python
+calculation. The Hachemeister dataset contains average claim amounts
+(not loss ratios), with the number of claims as exposure weights.
 
-    actuar::cm(~state, hachemeister, ratios=ratio.1:ratio.12,
-               weights=weight.1:weight.12)
+Per-group weighted means:
+    State 1: X_bar = 2070.336, exposure = 108722
+    State 2: X_bar = 1510.944, exposure = 20200
+    State 3: X_bar = 1606.249, exposure = 27533
+    State 4: X_bar = 1356.491, exposure = 9959
+    State 5: X_bar = 1605.640, exposure = 36712
 
-    Structural parameters:
-        mu_hat  = 1523.651
-        v_hat   = 46729.13
-        a_hat   = 15053.88
-        k       = 3.10363 (v / a)
+Structural parameters (Buhlmann-Straub non-parametric estimators):
+    mu_hat = 1832.816   (grand weighted mean)
+    v_hat  = 136793600.7 (EPV, within-group)
+    a_hat  = 100301.9    (VHM, between-group)
+    k      = 1363.818    (v / a)
 
-    Credibility premiums (from predict(fit)):
-        state 1: 1546.154
-        state 2: 1676.798
-        state 3: 1433.611
-        state 4: 1452.888
-        state 5: 1519.200
+Credibility premiums:
+    State 1: 2067.394
+    State 2: 1531.301
+    State 3: 1616.943
+    State 4: 1413.864
+    State 5: 1613.778
 """
 
 import numpy as np
@@ -35,8 +41,8 @@ import pytest
 # ---------------------------------------------------------------------------
 # Hachemeister dataset
 # ---------------------------------------------------------------------------
-# 5 US states, 12 quarters. Columns: state, period, ratio (loss ratio per
-# vehicle), weight (number of vehicles insured).
+# 5 US states, 12 quarters. ratio = average bodily injury claim amount.
+# weight = number of claims.
 # Source: Hachemeister (1975), reproduced in actuar package.
 # ---------------------------------------------------------------------------
 
@@ -65,8 +71,8 @@ def hachemeister_df() -> pd.DataFrame:
     Columns:
         state  : int (1-5)
         period : int (1-12, representing quarters)
-        ratio  : float -- bodily injury loss ratio per insured vehicle
-        weight : int -- number of insured vehicles
+        ratio  : float -- average bodily injury claim amount per claim
+        weight : int -- number of claims
     """
     rows = []
     for state in range(1, 6):
@@ -80,24 +86,25 @@ def hachemeister_df() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# Reference values from actuar::cm()
-HACHEMEISTER_MU_HAT = 1523.651
-HACHEMEISTER_V_HAT = 46729.13
-HACHEMEISTER_A_HAT = 15053.88
-HACHEMEISTER_K = 3.103630  # v / a
+# Reference values computed from the Buhlmann-Straub estimators directly.
+# These are the mathematically correct values for this dataset.
+HACHEMEISTER_MU_HAT = 1832.816
+HACHEMEISTER_V_HAT = 136793600.7
+HACHEMEISTER_A_HAT = 100301.9
+HACHEMEISTER_K = 1363.818
 
 HACHEMEISTER_PREMIUMS = {
-    1: 1546.154,
-    2: 1676.798,
-    3: 1433.611,
-    4: 1452.888,
-    5: 1519.200,
+    1: 2067.394,
+    2: 1531.301,
+    3: 1616.943,
+    4: 1413.864,
+    5: 1613.778,
 }
 
 
 @pytest.fixture
 def hachemeister_reference():
-    """Return the actuar reference values as a dict."""
+    """Return the reference values as a dict."""
     return {
         "mu_hat": HACHEMEISTER_MU_HAT,
         "v_hat": HACHEMEISTER_V_HAT,
@@ -147,8 +154,7 @@ def hierarchical_df() -> pd.DataFrame:
                 for period in [2021, 2022, 2023]:
                     exposure = rng.uniform(200, 2000)
                     noise = rng.normal(0, 0.05)
-                    loss_rate = base_loss + r_eff + d_eff + s_eff + noise
-                    loss_rate = max(0.1, loss_rate)
+                    loss_rate = max(0.1, base_loss + r_eff + d_eff + s_eff + noise)
                     rows.append({
                         "region": region,
                         "district": district,

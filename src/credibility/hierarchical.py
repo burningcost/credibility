@@ -355,14 +355,16 @@ class HierarchicalBuhlmannStraub:
         equals a at level L+1, propagating variance components up the hierarchy.
         """
         # Aggregate data to child level (summing over periods)
+        # Select only the columns we need before groupby to avoid include_groups issues
+        # across different pandas versions (include_groups added in pandas 2.2)
+        agg_cols = data[[parent_col, child_col, weight_col, loss_col]].copy()
         child_summary = (
-            data.groupby([parent_col, child_col])
+            agg_cols.groupby([parent_col, child_col])
             .apply(
                 lambda g: pd.Series({
                     "exposure": g[weight_col].sum(),
                     "loss_rate": (g[weight_col] * g[loss_col]).sum() / g[weight_col].sum(),
                 }),
-                include_groups=False,
             )
             .reset_index()
         )
