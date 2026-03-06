@@ -150,16 +150,16 @@ If the a_hat estimate is negative (rare, but possible with fewer than ~5 groups 
 
 The standard validation dataset is Hachemeister (1975): 5 US states, 12 quarters of bodily injury liability loss ratios with exposure weights. The R package `actuar` ships this dataset and uses it to validate `cm()`.
 
-Our model matches `actuar::cm()` to within 0.1% on all structural parameters:
+Our model produces the following structural parameters on this dataset:
 
-| Parameter | actuar | this package |
-|---|---|---|
-| mu | 1523.65 | 1523.65 |
-| v (EPV) | 46729.1 | 46729.1 |
-| a (VHM) | 15053.9 | 15053.9 |
-| k | 3.1036 | 3.1036 |
+| Parameter | Value |
+|---|---|
+| mu | 1832.82 |
+| v (EPV) | 136,793,601 |
+| a (VHM) | 100,302 |
+| k | 1363.82 |
 
-Credibility premiums match to within 0.2%.
+The large v reflects substantial quarter-to-quarter claim severity variation within each state. k = 1364 means a state needs roughly 1,364 claims to reach Z = 0.50 — State 1 with 108,722 total claims reaches Z = 0.988 (near-full credibility), while State 4 with 9,959 claims reaches Z = 0.880.
 
 ---
 
