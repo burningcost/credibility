@@ -29,7 +29,7 @@ Bühlmann-Straub credibility theory gives a mathematically rigorous way to estim
 ## Installation
 
 ```bash
-uv pip install credibility
+uv add credibility
 ```
 
 Requires Python 3.9+ and polars, numpy.
@@ -37,7 +37,7 @@ Requires Python 3.9+ and polars, numpy.
 If you want to pass pandas DataFrames as input (they are converted to Polars internally), install the optional pandas bridge:
 
 ```bash
-uv pip install "credibility[pandas]"
+uv add "credibility[pandas]"
 ```
 
 ---
@@ -51,7 +51,7 @@ import polars as pl
 from credibility import BuhlmannStraub
 
 # One row per scheme per year. loss_rate is ultimate loss ratio.
-# exposure is earned premium (or earned car years, or policy count —
+# exposure is earned premium (or earned car years, or policy count -
 # whatever you are weighting by).
 df = pl.DataFrame({
     "scheme":    ["Motor Guild", "Motor Guild", "Motor Guild",
