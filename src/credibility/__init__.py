@@ -1,5 +1,5 @@
 """
-credibility — Bühlmann-Straub credibility models for insurance pricing.
+credibility - Bühlmann-Straub credibility models for insurance pricing.
 
 This package implements the Bühlmann-Straub (1970) credibility model and its
 hierarchical extension (Jewell, 1975) for UK non-life insurance pricing teams.

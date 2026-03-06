@@ -296,7 +296,7 @@ class HierarchicalBuhlmannStraub:
     # ------------------------------------------------------------------
 
     def _validate_hierarchy(self, data: pl.DataFrame) -> None:
-        """Check that the hierarchy is strict — each child belongs to exactly one parent."""
+        """Check that the hierarchy is strict - each child belongs to exactly one parent."""
         for depth in range(len(self.level_cols) - 1):
             parent = self.level_cols[depth]
             child = self.level_cols[depth + 1]

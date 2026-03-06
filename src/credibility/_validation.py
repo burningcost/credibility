@@ -50,7 +50,7 @@ def validate_panel_data(
     Parameters
     ----------
     data:
-        Panel data — one row per (group, period). Must be a pl.DataFrame.
+        Panel data - one row per (group, period). Must be a pl.DataFrame.
     group_col, period_col, loss_col, weight_col:
         Column names in `data`.
     """

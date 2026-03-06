@@ -1,7 +1,7 @@
 """
 Shared test fixtures for the credibility test suite.
 
-The primary benchmark dataset is the Hachemeister dataset — 5 US states,
+The primary benchmark dataset is the Hachemeister dataset - 5 US states,
 12 quarters of bodily injury claim severity with claim count weights.
 It appears in Hachemeister (1975) and is the canonical test case for
 Bühlmann-Straub credibility. The R package actuar ships it as

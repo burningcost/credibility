@@ -33,8 +33,8 @@ The credibility factor and premium for group i are:
     Z_i = w_i / (w_i + K)   credibility factor in [0, 1]
     P_i = Z_i * X̄_i + (1 - Z_i) * mu_hat
 
-A large K means the portfolio is noisy and homogeneous — trust the collective.
-A small K means groups genuinely differ — trust their own experience.
+A large K means the portfolio is noisy and homogeneous - trust the collective.
+A small K means groups genuinely differ - trust their own experience.
 
 References
 ----------
@@ -60,7 +60,7 @@ class BuhlmannStraub:
     Bühlmann-Straub credibility model with non-parametric structural parameter
     estimation.
 
-    Fit the model to a panel dataset — one row per (group, period) — where
+    Fit the model to a panel dataset - one row per (group, period) - where
     each row has a loss rate and an exposure weight. The model estimates the
     structural parameters v (within-group variance) and a (between-group
     variance) from the data itself, then computes a credibility factor Z_i
@@ -98,7 +98,7 @@ class BuhlmannStraub:
     def __init__(self, truncate_a: bool = True) -> None:
         self.truncate_a = truncate_a
 
-        # Fitted attributes — set by .fit()
+        # Fitted attributes - set by .fit()
         self._mu_hat: Optional[float] = None
         self._v_hat: Optional[float] = None
         self._a_hat: Optional[float] = None
@@ -135,7 +135,7 @@ class BuhlmannStraub:
             to count periods per group; the ordering does not matter.
         loss_col:
             Column containing the loss rate or loss ratio. This should be losses
-            per unit of exposure — not total losses. If you have total losses,
+            per unit of exposure - not total losses. If you have total losses,
             divide by the exposure column before fitting.
         weight_col:
             Column containing the exposure weight (e.g. earned car years,
@@ -171,7 +171,7 @@ class BuhlmannStraub:
                 warnings.warn(
                     f"Between-group variance estimate a_hat = {a_hat_raw:.6g} ≤ 0. "
                     "Truncating to zero. This means the model finds no detectable "
-                    "heterogeneity between groups — all groups will receive the "
+                    "heterogeneity between groups - all groups will receive the "
                     "collective mean as their credibility premium (Z_i = 0). "
                     "Consider whether your data genuinely lacks between-group "
                     "variation, or whether you have too few groups to estimate a reliably.",
@@ -232,7 +232,7 @@ class BuhlmannStraub:
     @property
     def mu_hat_(self) -> float:
         """
-        Collective mean — the grand weighted average loss rate across all groups.
+        Collective mean - the grand weighted average loss rate across all groups.
 
         This is the complement: what every group's credibility premium regresses
         toward as exposure shrinks.
@@ -243,10 +243,10 @@ class BuhlmannStraub:
     @property
     def v_hat_(self) -> float:
         """
-        EPV — Expected value of Process Variance.
+        EPV - Expected value of Process Variance.
 
         Measures within-group year-to-year volatility, averaged across groups.
-        High v_hat means individual group experience is noisy — lean on the
+        High v_hat means individual group experience is noisy - lean on the
         collective mean.
         """
         self._check_fitted()
@@ -255,10 +255,10 @@ class BuhlmannStraub:
     @property
     def a_hat_(self) -> float:
         """
-        VHM — Variance of Hypothetical Means.
+        VHM - Variance of Hypothetical Means.
 
         Measures how much the true underlying loss rates differ between groups.
-        High a_hat means groups are genuinely heterogeneous — trust their own
+        High a_hat means groups are genuinely heterogeneous - trust their own
         experience. Truncated at zero if truncate_a=True.
         """
         self._check_fitted()
@@ -267,7 +267,7 @@ class BuhlmannStraub:
     @property
     def k_(self) -> float:
         """
-        Bühlmann's k — the credibility parameter.
+        Bühlmann's k - the credibility parameter.
 
         k = v / a. This is the exposure a group needs to achieve Z = 0.5 (equal
         weight on own experience and collective mean). A group with exposure w_i
@@ -281,7 +281,7 @@ class BuhlmannStraub:
     @property
     def z_(self) -> pl.DataFrame:
         """
-        Credibility factors — a Polars DataFrame with columns ["group", "Z"].
+        Credibility factors - a Polars DataFrame with columns ["group", "Z"].
 
         Z_i = w_i / (w_i + k), ranging from 0 (no credibility, use collective
         mean) to 1 (full credibility, use group's own experience).
@@ -300,7 +300,7 @@ class BuhlmannStraub:
     @property
     def premiums_(self) -> pl.DataFrame:
         """
-        Credibility premiums — one row per group, as a Polars DataFrame.
+        Credibility premiums - one row per group, as a Polars DataFrame.
 
         Columns:
 
@@ -417,7 +417,7 @@ class BuhlmannStraub:
         Returns
         -------
         mu_hat, v_hat, a_hat_raw
-            a_hat_raw may be negative — the caller decides how to handle it.
+            a_hat_raw may be negative - the caller decides how to handle it.
         """
         w = groups["w_i"].to_numpy()
         x_bar = groups["x_bar_i"].to_numpy()

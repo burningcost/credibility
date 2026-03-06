@@ -1,19 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # credibility — Bühlmann-Straub Demo
+# MAGIC # credibility - Bühlmann-Straub Demo
 # MAGIC
 # MAGIC This notebook demonstrates the credibility library's Polars-native API
 # MAGIC (v0.2.0) on two realistic insurance datasets:
 # MAGIC
-# MAGIC 1. **Hachemeister benchmark** — the actuarial standard validation dataset.
+# MAGIC 1. **Hachemeister benchmark** - the actuarial standard validation dataset.
 # MAGIC    5 US states, 12 quarters of bodily injury claim severity with claim count
 # MAGIC    weights. Reference values cross-checked against the R `actuar` package.
 # MAGIC
-# MAGIC 2. **Synthetic scheme portfolio** — 20 commercial motor schemes over 5 years.
+# MAGIC 2. **Synthetic scheme portfolio** - 20 commercial motor schemes over 5 years.
 # MAGIC    Demonstrates the practical use case: setting next year's credibility
 # MAGIC    premium for each scheme given varying volumes of loss experience.
 # MAGIC
-# MAGIC 3. **Hierarchical geographic model** — postcode district → area, showing
+# MAGIC 3. **Hierarchical geographic model** - postcode district → area, showing
 # MAGIC    how the hierarchical extension borrows strength across levels.
 
 # COMMAND ----------
@@ -137,8 +137,8 @@ print(bs_hach.premiums_.sort("credibility_premium", descending=True))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC State 1 has 108,722 total claims — it reaches Z = 0.988 (near-full credibility).
-# MAGIC State 4 has 9,959 claims — its Z is 0.880.
+# MAGIC State 1 has 108,722 total claims - it reaches Z = 0.988 (near-full credibility).
+# MAGIC State 4 has 9,959 claims - its Z is 0.880.
 # MAGIC k = 1,364 means a state needs 1,364 claims to reach Z = 0.50.
 # MAGIC At these volumes, all five states are highly credible.
 
@@ -187,7 +187,7 @@ scheme_data.head(10)
 # COMMAND ----------
 
 # DBTITLE 1,Fit and interpret
-# Schemes with only 1 year of data will trigger a warning — expected behaviour
+# Schemes with only 1 year of data will trigger a warning - expected behaviour
 with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
     bs_schemes = BuhlmannStraub()
@@ -292,7 +292,7 @@ for level in ["area", "district", "sector"]:
 
 # COMMAND ----------
 
-# DBTITLE 1,Sector premiums — blended across all three levels
+# DBTITLE 1,Sector premiums - blended across all three levels
 sector_premiums = hier.premiums_.sort("credibility_premium", descending=True)
 print("Top 10 sector credibility premiums (blended):")
 print(sector_premiums.head(10))
@@ -342,7 +342,7 @@ try:
     print("\nThe pandas DataFrame was converted to Polars internally.")
     print("All output is Polars regardless of input type.")
 except ImportError:
-    print("pandas not installed — skipping bridge demo")
+    print("pandas not installed - skipping bridge demo")
 
 # COMMAND ----------
 
@@ -358,5 +358,5 @@ except ImportError:
 # MAGIC - The hierarchical model correctly propagates variance components and
 # MAGIC   preserves regional ordering in the blended premiums.
 # MAGIC
-# MAGIC The algorithms are unchanged from v0.1.0 — only the data layer moved from
+# MAGIC The algorithms are unchanged from v0.1.0 - only the data layer moved from
 # MAGIC pandas to Polars.

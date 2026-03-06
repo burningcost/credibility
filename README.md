@@ -8,7 +8,7 @@ Bühlmann-Straub credibility models for non-life insurance pricing.
 
 You price a portfolio of schemes. Scheme A has three years of data and a 72% loss ratio. The book average is 58%. How much do you trust scheme A's own experience when setting next year's rate?
 
-If you give it full weight, you are at the mercy of three years of claims volatility. If you ignore it entirely and use the book rate, you are mispricing the scheme's risk profile. The right answer is somewhere between the two — and the position depends on:
+If you give it full weight, you are at the mercy of three years of claims volatility. If you ignore it entirely and use the book rate, you are mispricing the scheme's risk profile. The right answer is somewhere between the two - and the position depends on:
 
 1. How much exposure scheme A has (more exposure → more trust in its own data)
 2. How noisy year-to-year loss ratios are across the portfolio (noisier → trust the book more)
@@ -93,9 +93,9 @@ Bühlmann-Straub Credibility Model
 
 The structural parameters:
 
-- **mu = 0.615**: book-wide weighted mean loss ratio — the complement all groups blend toward.
+- **mu = 0.615**: book-wide weighted mean loss ratio - the complement all groups blend toward.
 - **v = 0.000526**: EPV, the expected within-scheme year-to-year variance. Low: these schemes are fairly stable year to year.
-- **a = 0.004018**: VHM, the variance of true underlying loss ratios between schemes. Relatively high compared to v — the schemes genuinely differ. This drives Bühlmann's k very low (k = 0.131), which means Z is close to 1 even for small exposures.
+- **a = 0.004018**: VHM, the variance of true underlying loss ratios between schemes. Relatively high compared to v - the schemes genuinely differ. This drives Bühlmann's k very low (k = 0.131), which means Z is close to 1 even for small exposures.
 - **k = 0.131**: a scheme only needs 131 units of exposure to reach Z = 0.50. With the exposures here, all three schemes are at near-full credibility.
 
 For less heterogeneous portfolios (where k is much larger), the blend matters more.
@@ -103,10 +103,10 @@ For less heterogeneous portfolios (where k is much larger), the blend matters mo
 ### Accessing results programmatically
 
 ```python
-bs.mu_hat_   # 0.6153 — collective mean
-bs.v_hat_    # 0.000526 — EPV (within-group variance)
-bs.a_hat_    # 0.004018 — VHM (between-group variance)
-bs.k_        # 0.131 — Bühlmann's k
+bs.mu_hat_   # 0.6153 - collective mean
+bs.v_hat_    # 0.000526 - EPV (within-group variance)
+bs.a_hat_    # 0.004018 - VHM (between-group variance)
+bs.k_        # 0.131 - Bühlmann's k
 
 # z_ is a pl.DataFrame with columns ["group", "Z"]
 bs.z_
@@ -167,7 +167,7 @@ bs.premiums_
 
 ---
 
-## Structural parameters — what they tell you
+## Structural parameters - what they tell you
 
 | Parameter | Symbol | Meaning |
 |---|---|---|
@@ -178,7 +178,7 @@ bs.premiums_
 | Credibility factor | Z_i | W_i / (W_i + k), where W_i is the group's total exposure |
 | Credibility premium | P_i | Z_i * X_bar_i + (1 - Z_i) * mu |
 
-If the a_hat estimate is negative (rare, but possible with fewer than ~5 groups or a very homogeneous portfolio), the model truncates it to zero and sets all Z = 0. This means the data gives no evidence of between-group heterogeneity — every group gets the collective mean.
+If the a_hat estimate is negative (rare, but possible with fewer than ~5 groups or a very homogeneous portfolio), the model truncates it to zero and sets all Z = 0. This means the data gives no evidence of between-group heterogeneity - every group gets the collective mean.
 
 ---
 
@@ -195,7 +195,7 @@ Our model produces the following structural parameters on this dataset:
 | a (VHM) | 100,302 |
 | k | 1363.82 |
 
-The large v reflects substantial quarter-to-quarter claim severity variation within each state. k = 1364 means a state needs roughly 1,364 claims to reach Z = 0.50 — State 1 with 108,722 total claims reaches Z = 0.988 (near-full credibility), while State 4 with 9,959 claims reaches Z = 0.880.
+The large v reflects substantial quarter-to-quarter claim severity variation within each state. k = 1364 means a state needs roughly 1,364 claims to reach Z = 0.50 - State 1 with 108,722 total claims reaches Z = 0.988 (near-full credibility), while State 4 with 9,959 claims reaches Z = 0.880.
 
 ---
 
@@ -207,7 +207,7 @@ The large v reflects substantial quarter-to-quarter claim severity variation wit
 
 **Why a `group` column instead of a DataFrame index?** Polars does not have a row index in the pandas sense. Using a named `group` column is explicit, composable (you can join it to other DataFrames trivially), and avoids the confusion that arises when an index has a name in pandas but behaves differently from a column.
 
-**Why truncate negative a_hat rather than using an iterative estimator?** The closed-form estimator is transparent and exactly matches actuar's default `method="unbiased"`. Negative a_hat is a signal, not a failure — it tells you the portfolio appears homogeneous. Truncating at zero is the standard actuarial convention (Bühlmann & Gisler, 2005, §4.3).
+**Why truncate negative a_hat rather than using an iterative estimator?** The closed-form estimator is transparent and exactly matches actuar's default `method="unbiased"`. Negative a_hat is a signal, not a failure - it tells you the portfolio appears homogeneous. Truncating at zero is the standard actuarial convention (Bühlmann & Gisler, 2005, §4.3).
 
 **Why separate `HierarchicalBuhlmannStraub` instead of a `levels` argument?** The hierarchical model has genuinely different output (per-level parameters, multi-level premiums). Merging it with `BuhlmannStraub` would make both classes harder to use.
 
