@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "credibility"
-version = "0.1.0"
+version = "0.2.0"
 description = "Bühlmann-Straub credibility models for non-life insurance pricing"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,13 +35,19 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.21",
-    "pandas>=1.3",
+    "polars>=0.20",
 ]
 
 [project.optional-dependencies]
+pandas = [
+    # Optional bridge: accept pd.DataFrame input without breaking existing users.
+    # Not required for the core library — install only if you pass pandas DataFrames.
+    "pandas>=1.3",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "pandas>=1.3",  # tests include a pandas-bridge test
 ]
 
 [project.urls]

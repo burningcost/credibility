@@ -41,11 +41,12 @@ Bühlmann, H. & Gisler, A. (2005). A Course in Credibility Theory and its
 from __future__ import annotations
 
 import warnings
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
+from ._validation import _to_polars
 from .buhlmann_straub import BuhlmannStraub
 
 
@@ -66,9 +67,9 @@ class LevelResult:
     k:
         Bühlmann's k = v / a at this level.
     z:
-        Credibility factors indexed by this level's node identifier.
+        Credibility factors as a pl.DataFrame with columns ["group", "Z"].
     premiums:
-        Credibility premiums at this level.
+        Credibility premiums as a pl.DataFrame with a "group" column.
     """
 
     def __init__(
@@ -78,8 +79,8 @@ class LevelResult:
         v_hat: float,
         a_hat: float,
         k: float,
-        z: pd.Series,
-        premiums: pd.DataFrame,
+        z: pl.DataFrame,
+        premiums: pl.DataFrame,
     ) -> None:
         self.level_name = level_name
         self.mu_hat = mu_hat
@@ -153,12 +154,12 @@ class HierarchicalBuhlmannStraub:
         self.level_cols = level_cols
         self.truncate_a = truncate_a
         self._fitted = False
-        self._level_results: Optional[dict] = None
-        self._bottom_premiums: Optional[pd.DataFrame] = None
+        self._level_results: Optional[Dict[str, LevelResult]] = None
+        self._bottom_premiums: Optional[pl.DataFrame] = None
 
     def fit(
         self,
-        data: pd.DataFrame,
+        data: Union[pl.DataFrame, "pd.DataFrame"],  # type: ignore[name-defined]
         period_col: str = "period",
         loss_col: str = "loss",
         weight_col: str = "weight",
@@ -169,9 +170,9 @@ class HierarchicalBuhlmannStraub:
         Parameters
         ----------
         data:
-            Panel DataFrame with one row per (leaf node, period). Must contain
-            all columns in ``level_cols`` plus ``period_col``, ``loss_col``,
-            and ``weight_col``.
+            Panel DataFrame (Polars preferred, pandas accepted) with one row
+            per (leaf node, period). Must contain all columns in ``level_cols``
+            plus ``period_col``, ``loss_col``, and ``weight_col``.
         period_col:
             Column identifying the time period.
         loss_col:
@@ -183,6 +184,8 @@ class HierarchicalBuhlmannStraub:
         -------
         self
         """
+        data = _to_polars(data)
+
         required_cols = set(self.level_cols) | {period_col, loss_col, weight_col}
         missing = required_cols - set(data.columns)
         if missing:
@@ -196,7 +199,7 @@ class HierarchicalBuhlmannStraub:
         self._validate_hierarchy(data)
 
         # Bottom-up: estimate variance components at each level
-        level_results = {}
+        level_results: Dict[str, LevelResult] = {}
         bottom_level = self.level_cols[-1]
 
         # At the innermost level, fit BuhlmannStraub with the leaf node as group
@@ -207,12 +210,11 @@ class HierarchicalBuhlmannStraub:
         # For each higher level, aggregate upward and fit B-S treating each node
         # at that level as a "group" with its children's credibility premiums as
         # "observations" (but we use the raw aggregated data for cleaner estimation)
-        current_data = data.copy()
         for depth in range(len(self.level_cols) - 2, -1, -1):
             parent_col = self.level_cols[depth]
             child_col = self.level_cols[depth + 1]
             level_result = self._fit_upper_level(
-                current_data,
+                data,
                 parent_col,
                 child_col,
                 loss_col,
@@ -233,7 +235,7 @@ class HierarchicalBuhlmannStraub:
     # ------------------------------------------------------------------
 
     @property
-    def level_results_(self) -> dict:
+    def level_results_(self) -> Dict[str, LevelResult]:
         """
         Dictionary mapping level name to LevelResult with fitted parameters.
         """
@@ -241,7 +243,7 @@ class HierarchicalBuhlmannStraub:
         return self._level_results  # type: ignore[return-value]
 
     @property
-    def premiums_(self) -> pd.DataFrame:
+    def premiums_(self) -> pl.DataFrame:
         """
         Credibility premiums at the bottom (leaf) level of the hierarchy.
 
@@ -250,7 +252,7 @@ class HierarchicalBuhlmannStraub:
         self._check_fitted()
         return self._bottom_premiums  # type: ignore[return-value]
 
-    def premiums_at(self, level: str) -> pd.DataFrame:
+    def premiums_at(self, level: str) -> pl.DataFrame:
         """
         Return the credibility premiums at a specified level of the hierarchy.
 
@@ -261,9 +263,9 @@ class HierarchicalBuhlmannStraub:
 
         Returns
         -------
-        pd.DataFrame
-            Indexed by the level's node identifier, with columns
-            ``exposure``, ``observed_mean``, ``Z``, ``credibility_premium``.
+        pl.DataFrame
+            With a ``group`` column plus ``exposure``, ``observed_mean``,
+            ``Z``, ``credibility_premium``, and ``complement`` columns.
         """
         self._check_fitted()
         if level not in self.level_cols:
@@ -293,23 +295,29 @@ class HierarchicalBuhlmannStraub:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _validate_hierarchy(self, data: pd.DataFrame) -> None:
+    def _validate_hierarchy(self, data: pl.DataFrame) -> None:
         """Check that the hierarchy is strict — each child belongs to exactly one parent."""
         for depth in range(len(self.level_cols) - 1):
             parent = self.level_cols[depth]
             child = self.level_cols[depth + 1]
-            parents_per_child = data.groupby(child)[parent].nunique()
-            ambiguous = parents_per_child[parents_per_child > 1]
-            if len(ambiguous) > 0:
+            parents_per_child = (
+                data.select([parent, child])
+                .unique()
+                .group_by(child)
+                .agg(pl.col(parent).n_unique().alias("n_parents"))
+            )
+            ambiguous = parents_per_child.filter(pl.col("n_parents") > 1)
+            if ambiguous.height > 0:
+                examples = ambiguous[child].to_list()[:3]
                 raise ValueError(
                     f"Hierarchy is not strict at level '{child}' → '{parent}': "
-                    f"{len(ambiguous)} child node(s) appear under multiple parents. "
-                    f"Examples: {ambiguous.head(3).index.tolist()}"
+                    f"{ambiguous.height} child node(s) appear under multiple parents. "
+                    f"Examples: {examples}"
                 )
 
     def _fit_innermost_level(
         self,
-        data: pd.DataFrame,
+        data: pl.DataFrame,
         leaf_col: str,
         period_col: str,
         loss_col: str,
@@ -336,7 +344,7 @@ class HierarchicalBuhlmannStraub:
 
     def _fit_upper_level(
         self,
-        data: pd.DataFrame,
+        data: pl.DataFrame,
         parent_col: str,
         child_col: str,
         loss_col: str,
@@ -355,18 +363,16 @@ class HierarchicalBuhlmannStraub:
         equals a at level L+1, propagating variance components up the hierarchy.
         """
         # Aggregate data to child level (summing over periods)
-        # Select only the columns we need before groupby to avoid include_groups issues
-        # across different pandas versions (include_groups added in pandas 2.2)
-        agg_cols = data[[parent_col, child_col, weight_col, loss_col]].copy()
         child_summary = (
-            agg_cols.groupby([parent_col, child_col])
-            .apply(
-                lambda g: pd.Series({
-                    "exposure": g[weight_col].sum(),
-                    "loss_rate": (g[weight_col] * g[loss_col]).sum() / g[weight_col].sum(),
-                }),
-            )
-            .reset_index()
+            data.select([parent_col, child_col, weight_col, loss_col])
+            .group_by([parent_col, child_col])
+            .agg([
+                pl.col(weight_col).sum().alias("exposure"),
+                (
+                    (pl.col(weight_col) * pl.col(loss_col)).sum()
+                    / pl.col(weight_col).sum()
+                ).alias("loss_rate"),
+            ])
         )
 
         # Fit B-S at parent level, treating each child as one "observation"
@@ -392,9 +398,9 @@ class HierarchicalBuhlmannStraub:
 
     def _compute_top_down_premiums(
         self,
-        data: pd.DataFrame,
-        level_results: dict,
-    ) -> pd.DataFrame:
+        data: pl.DataFrame,
+        level_results: Dict[str, LevelResult],
+    ) -> pl.DataFrame:
         """
         Compute the final blended premiums by propagating the hierarchy top-down.
 
@@ -408,9 +414,12 @@ class HierarchicalBuhlmannStraub:
         top_level = self.level_cols[0]
         top_lr = level_results[top_level]
 
-        # Start: parent premiums at top level are just the top-level premiums
-        # which already blend with mu_hat
-        parent_premiums = top_lr.premiums["credibility_premium"].rename(top_level)
+        # Start: parent premiums map from group id → credibility_premium at top level
+        # Represented as a pl.DataFrame with [group, parent_premium] for joining
+        parent_premiums_df = top_lr.premiums.select([
+            pl.col("group"),
+            pl.col("credibility_premium").alias("parent_premium"),
+        ])
 
         # Work downward, level by level
         for depth in range(1, len(self.level_cols)):
@@ -418,29 +427,51 @@ class HierarchicalBuhlmannStraub:
             parent_level = self.level_cols[depth - 1]
             current_lr = level_results[current_level]
 
-            # Map each node at the current level to its parent's premium
-            parent_map = (
-                data[[current_level, parent_level]]
-                .drop_duplicates()
-                .set_index(current_level)[parent_level]
+            # Map: child node id → parent node id (unique pairs)
+            child_to_parent = (
+                data.select([current_level, parent_level])
+                .unique()
+                .rename({current_level: "group", parent_level: "parent_id"})
             )
 
-            # For each node at current level, blend with parent premium
-            blended = {}
-            for node, row in current_lr.premiums.iterrows():
-                parent_id = parent_map[node]
-                parent_premium = parent_premiums[parent_id]
-                z = row["Z"]
-                x_bar = row["observed_mean"]
-                blended[node] = z * x_bar + (1 - z) * parent_premium
+            # Join child→parent map with parent premiums to get P_parent for each child
+            child_with_parent_premium = (
+                child_to_parent
+                .join(
+                    parent_premiums_df.rename({"group": "parent_id"}),
+                    on="parent_id",
+                    how="left",
+                )
+            )
 
-            parent_premiums = pd.Series(blended, name=current_level)
+            # Join current level premiums (Z, observed_mean) with parent premium
+            blended = (
+                current_lr.premiums.select(["group", "Z", "observed_mean"])
+                .join(child_with_parent_premium.select(["group", "parent_premium"]), on="group", how="left")
+                .with_columns(
+                    (
+                        pl.col("Z") * pl.col("observed_mean")
+                        + (1 - pl.col("Z")) * pl.col("parent_premium")
+                    ).alias("blended_premium")
+                )
+                .select(["group", "blended_premium"])
+                .rename({"blended_premium": "parent_premium"})
+            )
 
-        # Build final DataFrame
+            parent_premiums_df = blended
+
+        # Build final DataFrame: start from bottom-level premiums, replace credibility_premium
         bottom_level = self.level_cols[-1]
         bottom_lr = level_results[bottom_level]
-        result = bottom_lr.premiums.copy()
-        result["credibility_premium"] = parent_premiums.reindex(result.index)
+        result = (
+            bottom_lr.premiums
+            .drop("credibility_premium")
+            .join(
+                parent_premiums_df.rename({"parent_premium": "credibility_premium"}),
+                on="group",
+                how="left",
+            )
+        )
         return result
 
     def _check_fitted(self) -> None:

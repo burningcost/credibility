@@ -47,12 +47,12 @@ Bühlmann, H. & Gisler, A. (2005). A Course in Credibility Theory and its
 from __future__ import annotations
 
 import warnings
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
-from ._validation import check_duplicate_periods, validate_panel_data
+from ._validation import _to_polars, check_duplicate_periods, validate_panel_data
 
 
 class BuhlmannStraub:
@@ -80,10 +80,10 @@ class BuhlmannStraub:
 
     Examples
     --------
-    >>> import pandas as pd
+    >>> import polars as pl
     >>> from credibility import BuhlmannStraub
     >>>
-    >>> df = pd.DataFrame({
+    >>> df = pl.DataFrame({
     ...     "scheme": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
     ...     "year":   [2021, 2022, 2023] * 3,
     ...     "loss_rate": [0.55, 0.60, 0.58, 0.80, 0.75, 0.82, 0.40, 0.42, 0.38],
@@ -103,8 +103,8 @@ class BuhlmannStraub:
         self._v_hat: Optional[float] = None
         self._a_hat: Optional[float] = None
         self._k: Optional[float] = None
-        self._z: Optional[pd.Series] = None
-        self._premiums: Optional[pd.DataFrame] = None
+        self._z: Optional[pl.DataFrame] = None
+        self._premiums: Optional[pl.DataFrame] = None
         self._fitted = False
 
     # ------------------------------------------------------------------
@@ -113,7 +113,7 @@ class BuhlmannStraub:
 
     def fit(
         self,
-        data: pd.DataFrame,
+        data: Union[pl.DataFrame, "pd.DataFrame"],  # type: ignore[name-defined]
         group_col: str = "group",
         period_col: str = "period",
         loss_col: str = "loss",
@@ -125,8 +125,9 @@ class BuhlmannStraub:
         Parameters
         ----------
         data:
-            A pandas DataFrame with one row per (group, period). Columns need
-            not be in any particular order.
+            A Polars DataFrame (preferred) or pandas DataFrame (converted
+            internally) with one row per (group, period). Columns need not be
+            in any particular order.
         group_col:
             Column identifying the group (e.g. scheme ID, territory, NCD class).
         period_col:
@@ -145,6 +146,8 @@ class BuhlmannStraub:
         self
             Returns the fitted estimator so calls can be chained.
         """
+        data = _to_polars(data)
+
         validate_panel_data(data, group_col, period_col, loss_col, weight_col)
         check_duplicate_periods(data, group_col, period_col)
 
@@ -186,33 +189,37 @@ class BuhlmannStraub:
             k = v_hat / a_hat
 
         # Credibility factors
-        w = groups["w_i"].values
+        w = groups["w_i"].to_numpy()
         if np.isinf(k):
             z_values = np.zeros(len(groups))
         else:
             z_values = w / (w + k)
 
-        z = pd.Series(z_values, index=groups.index, name="Z")
+        group_ids = groups["group"].to_list()
+        x_bar = groups["x_bar_i"].to_numpy()
 
-        # Credibility premiums
-        x_bar = groups["x_bar_i"]
-        premiums = pd.DataFrame(
-            {
-                "group": groups.index,
-                "exposure": groups["w_i"],
-                "observed_mean": x_bar.values,
-                "Z": z_values,
-                "credibility_premium": z_values * x_bar.values + (1 - z_values) * mu_hat,
-                "complement": mu_hat,
-            }
-        ).set_index("group")
+        # z_ is a Polars DataFrame with columns ["group", "Z"]
+        z_df = pl.DataFrame({
+            "group": group_ids,
+            "Z": z_values,
+        })
+
+        # premiums_ is a Polars DataFrame with a "group" column (no index)
+        premiums = pl.DataFrame({
+            "group": group_ids,
+            "exposure": w,
+            "observed_mean": x_bar,
+            "Z": z_values,
+            "credibility_premium": z_values * x_bar + (1 - z_values) * mu_hat,
+            "complement": np.full(len(groups), mu_hat),
+        })
 
         self._mu_hat = float(mu_hat)
         self._v_hat = float(v_hat)
         self._a_hat = float(a_hat)
         self._a_hat_raw = float(a_hat_raw)
         self._k = float(k) if not np.isinf(k) else np.inf
-        self._z = z
+        self._z = z_df
         self._premiums = premiums
         self._fitted = True
 
@@ -272,25 +279,32 @@ class BuhlmannStraub:
         return self._k  # type: ignore[return-value]
 
     @property
-    def z_(self) -> pd.Series:
+    def z_(self) -> pl.DataFrame:
         """
-        Credibility factors — one per group, indexed by group identifier.
+        Credibility factors — a Polars DataFrame with columns ["group", "Z"].
 
         Z_i = w_i / (w_i + k), ranging from 0 (no credibility, use collective
         mean) to 1 (full credibility, use group's own experience).
 
-        A group needs exposure w_i = k to achieve Z = 0.5.
+        To look up a specific group::
+
+            bs.z_.filter(pl.col("group") == "Motor Guild")["Z"][0]
+
+        To find the group with the highest Z::
+
+            bs.z_.sort("Z", descending=True)["group"][0]
         """
         self._check_fitted()
         return self._z  # type: ignore[return-value]
 
     @property
-    def premiums_(self) -> pd.DataFrame:
+    def premiums_(self) -> pl.DataFrame:
         """
-        Credibility premiums — one row per group.
+        Credibility premiums — one row per group, as a Polars DataFrame.
 
         Columns:
 
+        - ``group``: group identifier
         - ``exposure``: total exposure weight for the group
         - ``observed_mean``: exposure-weighted average loss rate
         - ``Z``: credibility factor
@@ -304,7 +318,7 @@ class BuhlmannStraub:
     # Output
     # ------------------------------------------------------------------
 
-    def summary(self) -> pd.DataFrame:
+    def summary(self) -> pl.DataFrame:
         """
         Return a formatted summary of the fit.
 
@@ -313,7 +327,7 @@ class BuhlmannStraub:
 
         Returns
         -------
-        pd.DataFrame
+        pl.DataFrame
             Per-group results. Structural parameters are printed to stdout.
         """
         self._check_fitted()
@@ -333,8 +347,13 @@ class BuhlmannStraub:
             print(f"  (raw a_hat before truncation: {self._a_hat_raw:.6g})")
         print()
 
-        tbl = self._premiums.copy()
-        tbl.columns = ["Exposure", "Obs. Mean", "Z", "Cred. Premium", "Complement"]
+        tbl = self._premiums.rename({
+            "exposure": "Exposure",
+            "observed_mean": "Obs. Mean",
+            "Z": "Z",
+            "credibility_premium": "Cred. Premium",
+            "complement": "Complement",
+        })
         return tbl
 
     # ------------------------------------------------------------------
@@ -343,35 +362,40 @@ class BuhlmannStraub:
 
     @staticmethod
     def _build_group_summary(
-        data: pd.DataFrame,
+        data: pl.DataFrame,
         group_col: str,
         period_col: str,
         loss_col: str,
         weight_col: str,
-    ) -> pd.DataFrame:
+    ) -> pl.DataFrame:
         """
         Compute per-group summary statistics needed for parameter estimation.
 
-        Returns a DataFrame indexed by group_col with columns:
+        Returns a Polars DataFrame with columns:
+            group   : group identifier (same type as group_col)
             w_i     : total exposure (sum of weights)
             x_bar_i : exposure-weighted mean loss rate
             T_i     : number of periods
         """
-
-        def group_stats(grp: pd.DataFrame) -> pd.Series:
-            w_ij = grp[weight_col].values
-            x_ij = grp[loss_col].values
-            w_i = w_ij.sum()
-            x_bar_i = (w_ij * x_ij).sum() / w_i
-            T_i = len(grp)
-            return pd.Series({"w_i": w_i, "x_bar_i": x_bar_i, "T_i": T_i})
-
-        return data.groupby(group_col).apply(group_stats)
+        groups = (
+            data.group_by(group_col)
+            .agg([
+                pl.col(weight_col).sum().alias("w_i"),
+                (
+                    (pl.col(weight_col) * pl.col(loss_col)).sum()
+                    / pl.col(weight_col).sum()
+                ).alias("x_bar_i"),
+                pl.len().alias("T_i"),
+            ])
+            .rename({group_col: "group"})
+            .sort("group")
+        )
+        return groups
 
     @staticmethod
     def _estimate_structural_params(
-        data: pd.DataFrame,
-        groups: pd.DataFrame,
+        data: pl.DataFrame,
+        groups: pl.DataFrame,
         group_col: str,
         period_col: str,
         loss_col: str,
@@ -386,7 +410,7 @@ class BuhlmannStraub:
         Parameters
         ----------
         data:
-            Full panel data.
+            Full panel data (Polars DataFrame).
         groups:
             Per-group summary from _build_group_summary.
 
@@ -395,9 +419,10 @@ class BuhlmannStraub:
         mu_hat, v_hat, a_hat_raw
             a_hat_raw may be negative — the caller decides how to handle it.
         """
-        w = groups["w_i"].values
-        x_bar = groups["x_bar_i"].values
-        T = groups["T_i"].values
+        w = groups["w_i"].to_numpy()
+        x_bar = groups["x_bar_i"].to_numpy()
+        T = groups["T_i"].to_numpy()
+        group_ids = groups["group"].to_list()
         r = len(groups)
 
         # Collective mean: grand weighted average
@@ -408,15 +433,30 @@ class BuhlmannStraub:
         # v_hat = (1 / sum_i(T_i - 1)) * sum_i sum_j [ w_{ij} * (X_{ij} - X_bar_i)^2 ]
         denom_v = (T - 1).sum()  # degrees of freedom for v
 
-        numerator_v = 0.0
-        for group_id, grp_meta in groups.iterrows():
-            grp = data[data[group_col] == group_id]
-            w_ij = grp[weight_col].values
-            x_ij = grp[loss_col].values
-            x_bar_i = grp_meta["x_bar_i"]
-            numerator_v += (w_ij * (x_ij - x_bar_i) ** 2).sum()
+        # Build a lookup from group id → x_bar_i for the within-group deviation
+        x_bar_map = dict(zip(group_ids, x_bar))
 
-        v_hat = numerator_v / denom_v if denom_v > 0 else 0.0
+        # Join x_bar_i into the full data, then compute the weighted squared deviation
+        # We use a join rather than a Python loop for efficiency
+        x_bar_lf = pl.DataFrame({
+            group_col: group_ids,
+            "_x_bar_i": x_bar,
+        }).lazy()
+
+        numerator_v = (
+            data.lazy()
+            .join(x_bar_lf, on=group_col, how="left")
+            .with_columns(
+                (
+                    pl.col(weight_col) * (pl.col(loss_col) - pl.col("_x_bar_i")) ** 2
+                ).alias("_sq_dev")
+            )
+            .select(pl.col("_sq_dev").sum())
+            .collect()
+            ["_sq_dev"][0]
+        )
+
+        v_hat = float(numerator_v) / denom_v if denom_v > 0 else 0.0
 
         # a_hat: between-group variance
         # c = w_total - sum_i(w_i^2) / w_total

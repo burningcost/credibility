@@ -14,7 +14,7 @@ If you give it full weight, you are at the mercy of three years of claims volati
 2. How noisy year-to-year loss ratios are across the portfolio (noisier → trust the book more)
 3. How genuinely different schemes are from each other (more heterogeneous → trust each scheme's own data more)
 
-Bühlmann-Straub credibility theory gives a mathematically rigorous way to estimate all three and compute the optimal blend. This package implements it in Python, with no dependencies beyond NumPy and pandas.
+Bühlmann-Straub credibility theory gives a mathematically rigorous way to estimate all three and compute the optimal blend. This package implements it in Python, with no dependencies beyond NumPy and Polars.
 
 ---
 
@@ -32,7 +32,13 @@ Bühlmann-Straub credibility theory gives a mathematically rigorous way to estim
 pip install credibility
 ```
 
-Requires Python 3.9+ and pandas, numpy.
+Requires Python 3.9+ and polars, numpy.
+
+If you want to pass pandas DataFrames as input (they are converted to Polars internally), install the optional pandas bridge:
+
+```bash
+pip install "credibility[pandas]"
+```
 
 ---
 
@@ -41,13 +47,13 @@ Requires Python 3.9+ and pandas, numpy.
 ### Scheme pricing
 
 ```python
-import pandas as pd
+import polars as pl
 from credibility import BuhlmannStraub
 
 # One row per scheme per year. loss_rate is ultimate loss ratio.
 # exposure is earned premium (or earned car years, or policy count —
 # whatever you are weighting by).
-df = pd.DataFrame({
+df = pl.DataFrame({
     "scheme":    ["Motor Guild", "Motor Guild", "Motor Guild",
                   "Teachers",    "Teachers",    "Teachers",
                   "NHS Staff",   "NHS Staff",   "NHS Staff"],
@@ -79,10 +85,10 @@ Bühlmann-Straub Credibility Model
 
   Interpretation: a group needs exposure = k to achieve Z = 0.50
 
-  Scheme          Exposure  Obs. Mean  Z       Cred. Premium  Complement
-  Motor Guild       3650     0.713    0.9996      0.713          0.615
-  Teachers         14400     0.547    1.0000      0.547          0.615
-  NHS Staff         2550     0.613    0.9995      0.613          0.615
+  group         Exposure  Obs. Mean  Z       Cred. Premium  Complement
+  Motor Guild     3650     0.713    0.9996      0.713          0.615
+  Teachers       14400     0.547    1.0000      0.547          0.615
+  NHS Staff       2550     0.613    0.9995      0.613          0.615
 ```
 
 The structural parameters:
@@ -102,8 +108,20 @@ bs.v_hat_    # 0.000526 — EPV (within-group variance)
 bs.a_hat_    # 0.004018 — VHM (between-group variance)
 bs.k_        # 0.131 — Bühlmann's k
 
-bs.z_        # Series: {"Motor Guild": 0.9996, "Teachers": 1.0, "NHS Staff": 0.9995}
-bs.premiums_ # DataFrame with exposure, observed_mean, Z, credibility_premium, complement
+# z_ is a pl.DataFrame with columns ["group", "Z"]
+bs.z_
+# shape: (3, 2)
+# group        Z
+# Motor Guild  0.9996
+# Teachers     1.0000
+# NHS Staff    0.9995
+
+# Look up a specific group's Z:
+bs.z_.filter(pl.col("group") == "Teachers")["Z"][0]
+
+# premiums_ is a pl.DataFrame with group, exposure, observed_mean, Z,
+# credibility_premium, complement columns
+bs.premiums_
 ```
 
 ### Hierarchical credibility for geographic rating
@@ -111,6 +129,7 @@ bs.premiums_ # DataFrame with exposure, observed_mean, Z, credibility_premium, c
 Three-level postcode hierarchy. Each postcode sector borrows strength from its district, each district from its area.
 
 ```python
+import polars as pl
 from credibility import HierarchicalBuhlmannStraub
 
 model = HierarchicalBuhlmannStraub(level_cols=["area", "district", "sector"])
@@ -122,12 +141,29 @@ model.fit(
 )
 
 model.summary()                      # structural parameters at each level
-model.premiums_at("sector")         # blended sector-level premiums
+model.premiums_at("sector")         # blended sector-level premiums (pl.DataFrame)
 model.premiums_at("district")       # blended district-level premiums
 model.level_results_["district"].k  # Bühlmann's k at district level
 ```
 
 The model fits variance components bottom-up (sector → district → area) and then computes premiums top-down, so each sector's final premium reflects the information at all three levels.
+
+### Using pandas DataFrames
+
+If you already have pandas DataFrames, the library accepts them directly and converts internally. The output is always Polars.
+
+```python
+import pandas as pd
+from credibility import BuhlmannStraub
+
+df_pd = pd.read_csv("scheme_data.csv")  # pandas DataFrame
+bs = BuhlmannStraub()
+bs.fit(df_pd, group_col="scheme", period_col="year",
+       loss_col="loss_rate", weight_col="exposure")
+
+# premiums_ is a pl.DataFrame regardless of input type
+bs.premiums_
+```
 
 ---
 
@@ -165,9 +201,11 @@ The large v reflects substantial quarter-to-quarter claim severity variation wit
 
 ## Design decisions
 
-**Why no scipy?** The structural parameter estimators (Bühlmann-Straub 1970) are closed-form. There is no optimisation step, no matrix decomposition beyond what numpy handles. Keeping the dependency list minimal (numpy, pandas) makes the package easier to deploy in restricted environments.
+**Why Polars instead of pandas?** The core operations are group aggregations and joins. Polars expresses these without the index machinery that pandas requires, the API is explicit about column names throughout, and the lazy evaluation makes the within-group variance computation efficient without Python loops. The `_to_polars()` bridge means existing pandas users are not broken.
 
-**Why pandas for output, not numpy arrays?** Pricing teams work with named groups. A Series indexed by scheme name or postcode sector is usable directly. An array of floats requires a separate lookup table.
+**Why no scipy?** The structural parameter estimators (Bühlmann-Straub 1970) are closed-form. There is no optimisation step, no matrix decomposition beyond what numpy handles. Keeping the dependency list minimal (numpy, polars) makes the package easier to deploy in restricted environments.
+
+**Why a `group` column instead of a DataFrame index?** Polars does not have a row index in the pandas sense. Using a named `group` column is explicit, composable (you can join it to other DataFrames trivially), and avoids the confusion that arises when an index has a name in pandas but behaves differently from a column.
 
 **Why truncate negative a_hat rather than using an iterative estimator?** The closed-form estimator is transparent and exactly matches actuar's default `method="unbiased"`. Negative a_hat is a signal, not a failure — it tells you the portfolio appears homogeneous. Truncating at zero is the standard actuarial convention (Bühlmann & Gisler, 2005, §4.3).
 

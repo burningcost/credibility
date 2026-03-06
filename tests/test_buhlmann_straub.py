@@ -17,10 +17,19 @@ estimators (Bühlmann & Straub, 1970; Bühlmann & Gisler, 2005):
 import warnings
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 from credibility import BuhlmannStraub
+
+
+# ---------------------------------------------------------------------------
+# Helper: look up a value from premiums_ by group id
+# ---------------------------------------------------------------------------
+
+def _premium(premiums: pl.DataFrame, group_id, col: str):
+    """Extract a scalar from premiums_ for a given group and column."""
+    return premiums.filter(pl.col("group") == group_id)[col][0]
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +71,7 @@ class TestHachemeisterBenchmark:
         """Credibility premiums should match computed reference within 0.01%."""
         premiums = self.bs.premiums_
         for state, expected in self.ref["premiums"].items():
-            actual = premiums.loc[state, "credibility_premium"]
+            actual = _premium(premiums, state, "credibility_premium")
             rel_error = abs(actual - expected) / expected
             assert rel_error < 0.001, (
                 f"State {state}: expected {expected:.3f}, got {actual:.3f} "
@@ -71,15 +80,18 @@ class TestHachemeisterBenchmark:
 
     def test_z_between_zero_and_one(self):
         """All credibility factors must be in [0, 1]."""
-        assert (self.bs.z_ >= 0).all() and (self.bs.z_ <= 1).all()
+        z_vals = self.bs.z_["Z"]
+        assert (z_vals >= 0).all() and (z_vals <= 1).all()
 
     def test_state1_highest_z(self):
         """State 1 has the highest total exposure and should have the highest Z."""
-        assert self.bs.z_.idxmax() == 1
+        z = self.bs.z_
+        assert z.sort("Z", descending=True)["group"][0] == 1
 
     def test_state4_lowest_z(self):
         """State 4 has the lowest total exposure and should have the lowest Z."""
-        assert self.bs.z_.idxmin() == 4
+        z = self.bs.z_
+        assert z.sort("Z")["group"][0] == 4
 
     def test_premiums_dataframe_shape(self):
         """Premiums DataFrame should have 5 rows (one per state) and expected columns."""
@@ -97,16 +109,16 @@ class TestHachemeisterBenchmark:
         """
         premiums = self.bs.premiums_
         mu = self.bs.mu_hat_
-        for _, row in premiums.iterrows():
+        for row in premiums.iter_rows(named=True):
             expected = row["Z"] * row["observed_mean"] + (1 - row["Z"]) * mu
             assert abs(row["credibility_premium"] - expected) < 1e-6
 
     def test_summary_returns_dataframe(self, capsys):
-        """summary() should print to stdout and return a DataFrame."""
+        """summary() should print to stdout and return a Polars DataFrame."""
         result = self.bs.summary()
         captured = capsys.readouterr()
         assert "Bühlmann-Straub" in captured.out
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, pl.DataFrame)
         assert len(result) == 5
 
     def test_repr_after_fit(self):
@@ -122,7 +134,7 @@ class TestEdgeCases:
 
     def test_negative_a_hat_truncated(self):
         """When groups have the same loss rate, a_hat goes negative. Truncation should warn."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "A", "B", "B", "B"],
             "period": [1, 2, 3, 1, 2, 3],
             "loss": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
@@ -137,15 +149,13 @@ class TestEdgeCases:
 
         assert bs.a_hat_ == 0.0
         assert np.isinf(bs.k_)
-        assert (bs.z_ == 0.0).all()
-        np.testing.assert_allclose(
-            bs.premiums_["credibility_premium"].values,
-            bs.mu_hat_,
-        )
+        assert (bs.z_["Z"] == 0.0).all()
+        cp = bs.premiums_["credibility_premium"].to_numpy()
+        np.testing.assert_allclose(cp, bs.mu_hat_)
 
     def test_negative_a_hat_raises_when_not_truncating(self):
         """truncate_a=False should raise ValueError when a_hat <= 0."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "B", "B"],
             "period": [1, 2, 1, 2],
             "loss": [1.0, 1.0, 1.0, 1.0],
@@ -158,7 +168,7 @@ class TestEdgeCases:
 
     def test_all_single_period_raises(self):
         """If all groups have exactly one period, v cannot be estimated."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "B", "C"],
             "period": [1, 1, 1],
             "loss": [1.0, 1.2, 0.8],
@@ -171,7 +181,7 @@ class TestEdgeCases:
 
     def test_single_period_group_warns(self):
         """A group with only one period should trigger a warning but not fail."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "A", "B", "B", "B", "C"],
             "period": [1, 2, 3, 1, 2, 3, 1],
             "loss": [1.0, 1.1, 0.9, 1.5, 1.4, 1.6, 1.2],
@@ -186,11 +196,11 @@ class TestEdgeCases:
             assert len(single_period_warns) > 0
 
         assert bs._fitted
-        assert "C" in bs.z_.index
+        assert "C" in bs.z_["group"].to_list()
 
     def test_single_group_raises(self):
         """At least 2 groups are required."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "A"],
             "period": [1, 2, 3],
             "loss": [1.0, 1.1, 0.9],
@@ -202,14 +212,14 @@ class TestEdgeCases:
                    loss_col="loss", weight_col="weight")
 
     def test_missing_column_raises(self):
-        df = pd.DataFrame({"group": ["A"], "period": [1], "loss": [1.0]})
+        df = pl.DataFrame({"group": ["A"], "period": [1], "loss": [1.0]})
         bs = BuhlmannStraub()
         with pytest.raises(ValueError, match="Columns not found"):
             bs.fit(df, group_col="group", period_col="period",
                    loss_col="loss", weight_col="weight")
 
     def test_negative_weight_raises(self):
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "B", "B"],
             "period": [1, 2, 1, 2],
             "loss": [1.0, 1.1, 0.9, 1.0],
@@ -233,6 +243,21 @@ class TestEdgeCases:
         bs = BuhlmannStraub()
         assert "not fitted" in repr(bs)
 
+    def test_accepts_pandas_input(self):
+        """pandas DataFrames are converted to Polars internally; output is still Polars."""
+        pd = pytest.importorskip("pandas")
+        df_pd = pd.DataFrame({
+            "group": ["A", "A", "A", "B", "B", "B"],
+            "period": [1, 2, 3, 1, 2, 3],
+            "loss": [1.0, 1.1, 0.9, 1.5, 1.4, 1.6],
+            "weight": [100.0, 110.0, 90.0, 50.0, 60.0, 55.0],
+        })
+        bs = BuhlmannStraub()
+        bs.fit(df_pd, group_col="group", period_col="period",
+               loss_col="loss", weight_col="weight")
+        assert isinstance(bs.premiums_, pl.DataFrame)
+        assert isinstance(bs.z_, pl.DataFrame)
+
 
 # ---------------------------------------------------------------------------
 # Equal weights: reduces to standard Bühlmann (unweighted)
@@ -247,7 +272,7 @@ class TestEqualWeights:
 
     def test_equal_weights_z_depends_only_on_n_periods(self):
         """Groups with equal weight and same number of periods get the same Z."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "A", "B", "B", "B"],
             "period": [1, 2, 3, 1, 2, 3],
             "loss": [1.0, 1.5, 2.0, 0.5, 0.8, 0.6],
@@ -257,13 +282,13 @@ class TestEqualWeights:
         bs.fit(df, group_col="group", period_col="period",
                loss_col="loss", weight_col="weight")
 
-        z_a = bs.z_["A"]
-        z_b = bs.z_["B"]
+        z_a = bs.z_.filter(pl.col("group") == "A")["Z"][0]
+        z_b = bs.z_.filter(pl.col("group") == "B")["Z"][0]
         assert abs(z_a - z_b) < 1e-10
 
     def test_equal_weights_z_formula(self):
         """With equal weights, Z_i = w_i / (w_i + k) = n_i / (n_i + k)."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "group": ["A", "A", "A", "B", "B"],
             "period": [1, 2, 3, 1, 2],
             "loss": [1.0, 1.5, 2.0, 0.5, 0.8],
@@ -274,9 +299,11 @@ class TestEqualWeights:
                loss_col="loss", weight_col="weight")
 
         k = bs.k_
-        assert abs(bs.z_["A"] - 3 / (3 + k)) < 1e-10
-        assert abs(bs.z_["B"] - 2 / (2 + k)) < 1e-10
-        assert bs.z_["A"] > bs.z_["B"]
+        z_a = bs.z_.filter(pl.col("group") == "A")["Z"][0]
+        z_b = bs.z_.filter(pl.col("group") == "B")["Z"][0]
+        assert abs(z_a - 3 / (3 + k)) < 1e-10
+        assert abs(z_b - 2 / (2 + k)) < 1e-10
+        assert z_a > z_b
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +330,7 @@ class TestMathematicalProperties:
         """
         mu = self.bs.mu_hat_
         premiums = self.bs.premiums_
-        for _, row in premiums.iterrows():
+        for row in premiums.iter_rows(named=True):
             expected = row["Z"] * row["observed_mean"] + (1 - row["Z"]) * mu
             assert abs(row["credibility_premium"] - expected) < 1e-6
 
@@ -311,7 +338,7 @@ class TestMathematicalProperties:
         """Higher exposure implies higher Z (monotone in exposure when k is fixed)."""
         premiums = self.bs.premiums_
         k = self.bs.k_
-        for _, row in premiums.iterrows():
+        for row in premiums.iter_rows(named=True):
             z_expected = row["exposure"] / (row["exposure"] + k)
             assert abs(row["Z"] - z_expected) < 1e-10
 
@@ -319,22 +346,22 @@ class TestMathematicalProperties:
         """k = v / a by definition."""
         assert abs(self.bs.k_ - self.bs.v_hat_ / self.bs.a_hat_) < 1e-4
 
-    def test_premiums_indexed_by_group(self):
-        """Premiums DataFrame index should match the group column values."""
-        assert set(self.bs.premiums_.index) == {1, 2, 3, 4, 5}
+    def test_premiums_group_column_values(self):
+        """Premiums DataFrame 'group' column should contain all state identifiers."""
+        assert set(self.bs.premiums_["group"].to_list()) == {1, 2, 3, 4, 5}
 
-    def test_z_indexed_by_group(self):
-        """Z Series index should match the group column values."""
-        assert set(self.bs.z_.index) == {1, 2, 3, 4, 5}
+    def test_z_group_column_values(self):
+        """z_ DataFrame 'group' column should contain all state identifiers."""
+        assert set(self.bs.z_["group"].to_list()) == {1, 2, 3, 4, 5}
 
     def test_state1_highest_mean_gets_premium_above_mu(self):
         """State 1 has the highest observed mean (2070), so its premium should be above mu_hat."""
         mu = self.bs.mu_hat_
-        state1_premium = self.bs.premiums_.loc[1, "credibility_premium"]
+        state1_premium = _premium(self.bs.premiums_, 1, "credibility_premium")
         assert state1_premium > mu
 
     def test_state4_lowest_mean_gets_premium_below_mu(self):
         """State 4 has the lowest observed mean (1356), so its premium should be below mu_hat."""
         mu = self.bs.mu_hat_
-        state4_premium = self.bs.premiums_.loc[4, "credibility_premium"]
+        state4_premium = _premium(self.bs.premiums_, 4, "credibility_premium")
         assert state4_premium < mu

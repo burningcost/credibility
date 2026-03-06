@@ -11,6 +11,7 @@ data-driven answer.
 
 Quick start::
 
+    import polars as pl
     from credibility import BuhlmannStraub
 
     bs = BuhlmannStraub()
@@ -18,7 +19,7 @@ Quick start::
            loss_col="loss_rate", weight_col="exposure")
 
     bs.summary()          # structural parameters + per-group table
-    bs.z_                 # credibility factors by scheme
+    bs.z_                 # credibility factors DataFrame by scheme
     bs.premiums_          # full results DataFrame
 
 For hierarchical multi-level structures::
@@ -28,6 +29,9 @@ For hierarchical multi-level structures::
     model = HierarchicalBuhlmannStraub(level_cols=["region", "district", "sector"])
     model.fit(df, period_col="year", loss_col="loss_rate", weight_col="exposure")
     model.premiums_at("sector")
+
+Pandas DataFrames are accepted as input and converted to Polars internally.
+All output is Polars.
 
 """
 
@@ -40,4 +44,4 @@ __all__ = [
     "LevelResult",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -13,7 +13,7 @@ that the model:
 import warnings
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 from credibility import BuhlmannStraub, HierarchicalBuhlmannStraub
@@ -74,17 +74,16 @@ class TestHierarchicalOutputShape:
         premiums = self.model.premiums_at("region")
         assert len(premiums) == 2
 
-    def test_bottom_premiums_has_same_index_as_premiums_at_sector(self):
+    def test_bottom_premiums_has_same_groups_as_premiums_at_sector(self):
         """
-        premiums_ and premiums_at("sector") share the same index but different
-        credibility_premium values: premiums_ has the hierarchically blended
-        premiums, premiums_at("sector") has the sector-level-only premiums.
+        premiums_ and premiums_at("sector") share the same group identifiers
+        but different credibility_premium values: premiums_ has the
+        hierarchically blended premiums, premiums_at("sector") has the
+        sector-level-only premiums.
         """
         bottom = self.model.premiums_
         sector = self.model.premiums_at("sector")
-        assert set(bottom.index) == set(sector.index)
-        # The top-down blending should change credibility_premium for sectors
-        # whose region/district premiums pull away from their own estimate
+        assert set(bottom["group"].to_list()) == set(sector["group"].to_list())
         assert "credibility_premium" in bottom.columns
         assert "credibility_premium" in sector.columns
 
@@ -97,7 +96,8 @@ class TestHierarchicalOutputShape:
     def test_z_between_zero_and_one_at_all_levels(self):
         for level in ["region", "district", "sector"]:
             lr = self.model.level_results_[level]
-            assert (lr.z >= 0).all() and (lr.z <= 1).all(), (
+            z_vals = lr.z["Z"]
+            assert (z_vals >= 0).all() and (z_vals <= 1).all(), (
                 f"Z values out of [0, 1] at level '{level}'"
             )
 
@@ -162,23 +162,30 @@ class TestHierarchicalPremiumProperties:
         Credibility premiums should reflect this on average.
         """
         premiums = self.model.premiums_
-        r1_sectors = [s for s in premiums.index if s.startswith("R1")]
-        r2_sectors = [s for s in premiums.index if s.startswith("R2")]
-        r1_mean = premiums.loc[r1_sectors, "credibility_premium"].mean()
-        r2_mean = premiums.loc[r2_sectors, "credibility_premium"].mean()
+        r1_mean = (
+            premiums
+            .filter(pl.col("group").str.starts_with("R1"))
+            ["credibility_premium"]
+            .mean()
+        )
+        r2_mean = (
+            premiums
+            .filter(pl.col("group").str.starts_with("R2"))
+            ["credibility_premium"]
+            .mean()
+        )
         assert r1_mean > r2_mean, (
             f"R1 mean premium {r1_mean:.4f} should exceed R2 {r2_mean:.4f}"
         )
 
     def test_premiums_not_all_equal(self):
         """If the model is working, premiums should differ across sectors."""
-        premiums = self.model.premiums_["credibility_premium"]
-        assert premiums.std() > 0
+        std = self.model.premiums_["credibility_premium"].std()
+        assert std > 0
 
     def test_premiums_all_positive(self):
         """Credibility premiums should be positive loss rates."""
-        premiums = self.model.premiums_["credibility_premium"]
-        assert (premiums > 0).all()
+        assert (self.model.premiums_["credibility_premium"] > 0).all()
 
 
 class TestHierarchicalEdgeCases:
@@ -209,7 +216,7 @@ class TestHierarchicalEdgeCases:
 
     def test_non_strict_hierarchy_raises(self):
         """If a child appears under multiple parents, raise a clear error."""
-        df = pd.DataFrame({
+        df = pl.DataFrame({
             "region": ["R1", "R1", "R2", "R2"],
             "district": ["D1", "D1", "D1", "D1"],  # D1 appears in both regions
             "period": [1, 2, 1, 2],
@@ -248,12 +255,18 @@ class TestHierarchicalConsistencyWithBuhlmannStraub:
         hier.fit(hierarchical_df, period_col="period",
                  loss_col="loss_rate", weight_col="exposure")
 
-        flat_premiums = bs.premiums_["credibility_premium"].sort_values()
-        hier_premiums = hier.premiums_["credibility_premium"].sort_values()
+        flat_premiums = (
+            bs.premiums_
+            .sort("credibility_premium")
+        )
+        hier_premiums = (
+            hier.premiums_
+            .sort("credibility_premium")
+        )
 
         # The top 3 and bottom 3 sectors by premium should have significant overlap
-        flat_top3 = set(flat_premiums.tail(3).index)
-        hier_top3 = set(hier_premiums.tail(3).index)
+        flat_top3 = set(flat_premiums["group"].tail(3).to_list())
+        hier_top3 = set(hier_premiums["group"].tail(3).to_list())
         overlap = len(flat_top3 & hier_top3)
         assert overlap >= 2, (
             f"Top-3 sector overlap too low: flat={flat_top3}, hier={hier_top3}"

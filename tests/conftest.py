@@ -34,7 +34,7 @@ Credibility premiums:
 """
 
 import numpy as np
-import pandas as pd
+import polars as pl
 import pytest
 
 
@@ -64,26 +64,32 @@ HACHEMEISTER_WEIGHTS = {
 
 
 @pytest.fixture
-def hachemeister_df() -> pd.DataFrame:
+def hachemeister_df() -> pl.DataFrame:
     """
-    Return the Hachemeister dataset as a tidy long-format DataFrame.
+    Return the Hachemeister dataset as a tidy long-format Polars DataFrame.
 
     Columns:
         state  : int (1-5)
         period : int (1-12, representing quarters)
         ratio  : float -- average bodily injury claim amount per claim
-        weight : int -- number of claims
+        weight : float -- number of claims
     """
-    rows = []
+    rows_state = []
+    rows_period = []
+    rows_ratio = []
+    rows_weight = []
     for state in range(1, 6):
         for period in range(1, 13):
-            rows.append({
-                "state": state,
-                "period": period,
-                "ratio": float(HACHEMEISTER_RATIOS[state][period - 1]),
-                "weight": float(HACHEMEISTER_WEIGHTS[state][period - 1]),
-            })
-    return pd.DataFrame(rows)
+            rows_state.append(state)
+            rows_period.append(period)
+            rows_ratio.append(float(HACHEMEISTER_RATIOS[state][period - 1]))
+            rows_weight.append(float(HACHEMEISTER_WEIGHTS[state][period - 1]))
+    return pl.DataFrame({
+        "state": rows_state,
+        "period": rows_period,
+        "ratio": rows_ratio,
+        "weight": rows_weight,
+    })
 
 
 # Reference values computed from the Buhlmann-Straub estimators directly.
@@ -119,7 +125,7 @@ def hachemeister_reference():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def hierarchical_df() -> pd.DataFrame:
+def hierarchical_df() -> pl.DataFrame:
     """
     Synthetic 3-level dataset: region -> district -> sector, 3 periods each.
 
@@ -143,7 +149,13 @@ def hierarchical_df() -> pd.DataFrame:
     }
 
     base_loss = 0.65
-    rows = []
+    rows_region = []
+    rows_district = []
+    rows_sector = []
+    rows_period = []
+    rows_loss_rate = []
+    rows_exposure = []
+
     for region, r_eff in region_effects.items():
         for d_idx in [1, 2]:
             district = f"{region}_D{d_idx}"
@@ -155,13 +167,18 @@ def hierarchical_df() -> pd.DataFrame:
                     exposure = rng.uniform(200, 2000)
                     noise = rng.normal(0, 0.05)
                     loss_rate = max(0.1, base_loss + r_eff + d_eff + s_eff + noise)
-                    rows.append({
-                        "region": region,
-                        "district": district,
-                        "sector": sector,
-                        "period": period,
-                        "loss_rate": loss_rate,
-                        "exposure": round(exposure),
-                    })
+                    rows_region.append(region)
+                    rows_district.append(district)
+                    rows_sector.append(sector)
+                    rows_period.append(period)
+                    rows_loss_rate.append(loss_rate)
+                    rows_exposure.append(round(exposure))
 
-    return pd.DataFrame(rows)
+    return pl.DataFrame({
+        "region": rows_region,
+        "district": rows_district,
+        "sector": rows_sector,
+        "period": rows_period,
+        "loss_rate": rows_loss_rate,
+        "exposure": rows_exposure,
+    })
