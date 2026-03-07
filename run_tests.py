@@ -4,7 +4,7 @@ Test runner for the credibility package on Databricks serverless compute.
 Installs polars and the package inline, then runs assertions against the
 Hachemeister benchmark and the synthetic hierarchical dataset.
 
-Version 0.2.0 — Polars-native (pandas is bridge-only).
+Version 0.2.0 - Polars-native (pandas is bridge-only).
 """
 
 # ============================================================
@@ -468,7 +468,7 @@ sys.path.insert(0, f"{pkg_dir}/src")
 from credibility import BuhlmannStraub, HierarchicalBuhlmannStraub
 
 print("\n" + "=" * 60)
-print("RUNNING TESTS (credibility v0.2.0 — Polars-native)")
+print("RUNNING TESTS (credibility v0.2.0 - Polars-native)")
 print("=" * 60)
 
 passed = 0

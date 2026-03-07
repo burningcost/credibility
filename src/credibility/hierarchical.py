@@ -102,7 +102,7 @@ class HierarchicalBuhlmannStraub:
     """
     Multi-level Bühlmann-Straub credibility model for nested group structures.
 
-    This model is appropriate when groups are arranged in a strict hierarchy —
+    This model is appropriate when groups are arranged in a strict hierarchy -
     every observation belongs to exactly one parent at each level. Typical uses:
 
     - Geographic: postcode sector → district → area
